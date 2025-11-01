@@ -30,6 +30,7 @@ type ValidatorPageData struct {
 	WithdrawCredentials      []byte                                `json:"withdraw_credentials"`
 	ShowWithdrawAddress      bool                                  `json:"show_withdraw_address"`
 	WithdrawAddress          []byte                                `json:"withdraw_address"`
+	TeeType                  uint8                                 `json:"tee_type"`
 	ExitReason               string                                `json:"exit_reason"`
 	ExitReasonSlot           uint64                                `json:"exit_reason_slot"`
 	ExitReasonSlashing       bool                                  `json:"exit_reason_slashing"`

@@ -420,7 +420,7 @@ type Validator struct {
 	Pubkey                     []byte `db:"pubkey"`
 	WithdrawalCredentials      []byte `db:"withdrawal_credentials"`
 	EffectiveBalance           uint64 `db:"effective_balance"`
-	Slashed                    bool   `db:"slashed"`
+	Slashed                    uint8  `db:"slashed"` // Repurposed as TEE type: 0=SEV, 1=TDX, 2=CCA
 	ActivationEligibilityEpoch int64  `db:"activation_eligibility_epoch"`
 	ActivationEpoch            int64  `db:"activation_epoch"`
 	ExitEpoch                  int64  `db:"exit_epoch"`

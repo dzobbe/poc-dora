@@ -125,6 +125,12 @@
           </div>
         </div>
         <div class="row border-bottom p-2 mx-0">
+          <div class="col-md-2"><span data-bs-toggle="tooltip" data-bs-placement="top" title="The TEE (Trusted Execution Environment) type for this validator">TEE Type:</span></div>
+          <div class="col-md-10">
+            {{ if eq .TeeType 0 }}SEV{{ else if eq .TeeType 1 }}TDX{{ else if eq .TeeType 2 }}CCA{{ else }}Unknown ({{ .TeeType }}){{ end }}
+          </div>
+        </div>
+        <div class="row border-bottom p-2 mx-0">
           <div class="col-md-2"><span data-bs-toggle="tooltip" data-bs-placement="top" title="Represents the full balance for this validator (Epoch {{ .CurrentEpoch }})">Balance:</span></div>
           <div class="col-md-10">
             {{ formatEthFromGwei .Balance }}

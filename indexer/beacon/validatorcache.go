@@ -46,6 +46,7 @@ type validatorEntry struct {
 	finalValidator *phase0.Validator
 	activeData     *ValidatorData
 	statusFlags    uint16
+	teeType        uint8 // Raw TEE type value: 0=SEV, 1=TDX, 2=CCA
 }
 
 // ValidatorData contains the essential validator state information for active validators
@@ -209,6 +210,14 @@ func (cache *validatorCache) updateValidatorSet(slot phase0.Slot, dependentRoot 
 			cachedValidator.finalValidator = validators[i]
 			cachedValidator.finalChecksum = checksum
 			cachedValidator.statusFlags = GetValidatorStatusFlags(validators[i])
+			// Extract TEE type: In extended blockchain, Slashed field contains TEE type
+			// Since phase0.Validator.Slashed is bool, we can only get 0 or 1 here
+			// For full support of value 2 (CCA), custom SSZ decoding is needed
+			if validators[i].Slashed {
+				cachedValidator.teeType = 1
+			} else {
+				cachedValidator.teeType = 0
+			}
 			updatedCount++
 
 			activeData := &ValidatorData{
@@ -558,11 +567,14 @@ func (cache *validatorCache) getValidatorStatusMap(epoch phase0.Epoch, blockRoot
 
 // UnwrapDbValidator unwraps a dbtypes.Validator to a phase0.Validator
 func UnwrapDbValidator(dbValidator *dbtypes.Validator) *phase0.Validator {
+	// Note: In extended blockchain, dbValidator.Slashed contains TEE type (0=SEV, 1=TDX, 2=CCA)
+	// but phase0.Validator.Slashed is bool. We convert: 0->false, >0->true
+	// The actual TEE type value should be read from the database when needed.
 	validator := &phase0.Validator{
 		PublicKey:                  phase0.BLSPubKey(dbValidator.Pubkey),
 		WithdrawalCredentials:      dbValidator.WithdrawalCredentials,
 		EffectiveBalance:           phase0.Gwei(dbValidator.EffectiveBalance),
-		Slashed:                    dbValidator.Slashed,
+		Slashed:                    dbValidator.Slashed > 0, // Convert uint8 TEE type to bool
 		ActivationEligibilityEpoch: phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ActivationEligibilityEpoch)),
 		ActivationEpoch:            phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ActivationEpoch)),
 		ExitEpoch:                  phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ExitEpoch)),
@@ -702,6 +714,7 @@ func (cache *validatorCache) prepopulateFromDB() (uint64, error) {
 			val := UnwrapDbValidator(dbVal)
 			valEntry := &validatorEntry{
 				finalChecksum: calculateValidatorChecksum(val),
+				teeType:       dbVal.Slashed, // Restore TEE type from database
 			}
 			valData := &ValidatorData{
 				ActivationEligibilityEpoch: phase0.Epoch(db.ConvertInt64ToUint64(dbVal.ActivationEligibilityEpoch)),
@@ -788,12 +801,14 @@ func (cache *validatorCache) persistValidators(tx *sqlx.Tx) (bool, error) {
 		lastIndex = uint64(index)
 
 		// Convert to db type
+		// Use cached TEE type value which was extracted during validator set update
+		// This preserves the original TEE type value (0=SEV, 1=TDX, 2=CCA if custom decoding is used)
 		dbVal := &dbtypes.Validator{
 			ValidatorIndex:             uint64(index),
 			Pubkey:                     entry.finalValidator.PublicKey[:],
 			WithdrawalCredentials:      entry.finalValidator.WithdrawalCredentials[:],
 			EffectiveBalance:           uint64(entry.finalValidator.EffectiveBalance),
-			Slashed:                    entry.finalValidator.Slashed,
+			Slashed:                    entry.teeType, // Use cached TEE type value
 			ActivationEligibilityEpoch: db.ConvertUint64ToInt64(uint64(entry.finalValidator.ActivationEligibilityEpoch)),
 			ActivationEpoch:            db.ConvertUint64ToInt64(uint64(entry.finalValidator.ActivationEpoch)),
 			ExitEpoch:                  db.ConvertUint64ToInt64(uint64(entry.finalValidator.ExitEpoch)),

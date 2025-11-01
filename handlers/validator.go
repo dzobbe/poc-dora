@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
+	"github.com/ethpandaops/dora/db"
 	"github.com/ethpandaops/dora/dbtypes"
 	"github.com/ethpandaops/dora/indexer/beacon"
 	"github.com/ethpandaops/dora/services"
@@ -123,6 +124,13 @@ func buildValidatorPageData(validatorIndex uint64, tabView string) (*models.Vali
 		return nil, 0
 	}
 
+	// Get TEE type from database: In extended blockchain, the Slashed field contains TEE type
+	// 0 => SEV, 1 => TDX, 2 => CCA
+	var teeType uint8 = 0
+	if dbValidator := db.GetValidatorByIndex(phase0.ValidatorIndex(validatorIndex)); dbValidator != nil {
+		teeType = dbValidator.Slashed // This field contains TEE type in extended blockchain
+	}
+
 	pageData := &models.ValidatorPageData{
 		CurrentEpoch:        uint64(chainState.CurrentEpoch()),
 		Index:               uint64(validator.Index),
@@ -132,6 +140,7 @@ func buildValidatorPageData(validatorIndex uint64, tabView string) (*models.Vali
 		EffectiveBalance:    uint64(validator.Validator.EffectiveBalance),
 		BeaconState:         validator.Status.String(),
 		WithdrawCredentials: validator.Validator.WithdrawalCredentials,
+		TeeType:             teeType,
 		TabView:             tabView,
 		ElectraIsActive:     specs.ElectraForkEpoch != nil && uint64(chainState.CurrentEpoch()) >= *specs.ElectraForkEpoch,
 	}
