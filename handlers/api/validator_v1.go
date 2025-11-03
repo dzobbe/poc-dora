@@ -20,7 +20,7 @@ type ApiValidatorResponseV1 struct {
 	Isonline                   bool   `json:"isonline"`
 	Name                       string `json:"name"`
 	Pubkey                     string `json:"pubkey"`
-	Slashed                    bool   `json:"slashed"`
+	Slashed                    uint8  `json:"slashed"`
 	Status                     string `json:"status"`
 	Validatorindex             uint64 `json:"validatorindex"`
 	Withdrawableepoch          uint64 `json:"withdrawableepoch"`

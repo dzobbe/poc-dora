@@ -395,7 +395,9 @@ func (sim *stateSimulator) applyBlock(block *Block) [][]uint8 {
 			return nil
 		}
 
-		validator.Slashed = true
+		// In extended blockchain, Slashed is now uint8 (TEE type)
+		// For slashing events, set to 1 (which functions as slashed flag since >0)
+		validator.Slashed = 1
 		validator.ExitEpoch = FarFutureEpoch - 1 // dummy value to indicate the validator is exiting, but we don't know when exactly
 	}
 
@@ -422,7 +424,7 @@ func (sim *stateSimulator) applyBlock(block *Block) [][]uint8 {
 				return nil
 			}
 
-			validator.Slashed = true
+			validator.Slashed = 1
 			validator.ExitEpoch = FarFutureEpoch - 1 // dummy value to indicate the validator is exiting, but we don't know when exactly
 		}
 	}

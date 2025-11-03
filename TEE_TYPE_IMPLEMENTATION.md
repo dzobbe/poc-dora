@@ -2,6 +2,10 @@
 
 This document describes the changes made to display TEE (Trusted Execution Environment) type information on the validator detail page in Dora.
 
+## Quick Summary
+
+The validator detail page now displays the TEE type of each validator. The implementation stores TEE types in the database and displays them on the UI. **However, to fully support all three TEE types (0, 1, and 2) from incoming SSZ data, you'll need to implement Option A (forking go-eth2-client library)** as described below.
+
 ## Overview
 
 In the extended blockchain, the `is_slashed` field in the validator SSZ data has been repurposed to store the TEE type, which can have the following values:
@@ -65,21 +69,69 @@ Two conversion functions were updated:
 
 ## Important Notes
 
+### Current Implementation
+
+The implementation now:
+- ✅ Stores TEE type values in cache and database
+- ✅ Displays TEE types 0 (SEV), 1 (TDX), and 2 (CCA) correctly from the database
+- ⚠️ Only captures values 0 and 1 from incoming SSZ data (due to `phase0.Validator.Slashed` being bool)
+
 ### SSZ Decoding Limitation
 
 The `phase0.Validator` struct from the external library (`github.com/attestantio/go-eth2-client/spec/phase0`) defines `Slashed` as a `bool`, which can only represent two values (0 or 1). 
 
-**For CCA (value 2) to work correctly**, you may need to:
+**For CCA (value 2) to work correctly**, you need to implement one of these solutions:
 
-1. **Option A**: Modify your SSZ decoding to directly access the raw byte value and store it correctly in the database with value 2.
+#### **Option A: Fork go-eth2-client Library (RECOMMENDED)**
 
-2. **Option B**: Fork the `go-eth2-client` library and change the `Slashed` field type to `uint8` in the `phase0.Validator` struct.
+This is the cleanest solution but requires maintaining a fork:
 
-3. **Option C**: Create a custom validator struct that extends `phase0.Validator` with an additional field for the raw TEE type value.
+1. Fork `github.com/attestantio/go-eth2-client`
+2. In `spec/phase0/validator.go`, change the `Slashed` field from `bool` to `uint8`:
+   ```go
+   type Validator struct {
+       PublicKey                  BLSPubKey `ssz-size:"48"`
+       WithdrawalCredentials      Root      `ssz-size:"32"`
+       EffectiveBalance           Gwei      `ssz-size:"8"`
+       Slashed                    uint8     `ssz-size:"1"`  // Changed from bool to uint8
+       ActivationEligibilityEpoch Epoch     `ssz-size:"8"`
+       ActivationEpoch            Epoch     `ssz-size:"8"`
+       ExitEpoch                  Epoch     `ssz-size:"8"`
+       WithdrawableEpoch          Epoch     `ssz-size:"8"`
+   }
+   ```
+3. Update your `go.mod` to use the forked version:
+   ```bash
+   go mod edit -replace github.com/attestantio/go-eth2-client=github.com/yourusername/go-eth2-client@tee-support
+   ```
+4. Update the code that uses `Slashed` as bool to use it as uint8
+5. Remove the conversion logic in `validatorcache.go`
 
-Currently, the implementation will:
-- Correctly display all three TEE types if the value is stored in the database as 0, 1, or 2
-- But SSZ data with value 2 will be decoded as `true` (equivalent to value 1) when using the standard library
+**Pros:** Clean, type-safe, preserves original values  
+**Cons:** Requires maintaining a fork, may need updates when upstream releases new versions
+
+#### **Option B: Custom Raw SSZ Parser**
+
+Implement a custom HTTP client that fetches raw SSZ bytes and parses the validators list manually:
+
+1. Add a new method `GetStateRawSSZ()` to `clients/consensus/rpc/beaconapi.go`
+2. Fetch the raw SSZ response from the beacon API
+3. Manually parse the validators list using `protolambda/ztyp` or similar
+4. Extract the TEE type byte at offset 88 within each validator
+5. Store these values before calling the standard `GetState()` method
+
+**Pros:** No fork required, full control over parsing  
+**Cons:** Complex implementation, need to maintain SSZ structure knowledge
+
+#### **Option C: Modify Your Beacon Node**
+
+If you control the beacon node implementation:
+
+1. Add a custom API endpoint that returns raw TEE type values
+2. Call this endpoint separately to get TEE types for validators
+3. Merge the data when populating the validator cache
+
+**Note:** If validators with CCA (value 2) already exist in your database, they will display correctly - the limitation only affects **new** validators being decoded from incoming SSZ data.
 
 ## Testing
 
@@ -92,13 +144,13 @@ After applying the changes and running the migration:
 
 ## Files Modified
 
-1. `db/schema/pgsql/20251101000001_tee-type-field.sql` (new)
-2. `db/schema/sqlite/20251101000001_tee-type-field.sql` (new)
-3. `dbtypes/dbtypes.go`
-4. `types/models/validator.go`
-5. `handlers/validator.go`
-6. `indexer/beacon/validatorcache.go`
-7. `templates/validator/validator.html`
+1. `db/schema/pgsql/20251101000001_tee-type-field.sql` (new migration)
+2. `db/schema/sqlite/20251101000001_tee-type-field.sql` (new migration)
+3. `dbtypes/dbtypes.go` - Changed `Validator.Slashed` from `bool` to `uint8`
+4. `types/models/validator.go` - Added `ValidatorPageData.TeeType` field
+5. `handlers/validator.go` - Retrieves TEE type from DB and displays on page
+6. `indexer/beacon/validatorcache.go` - Added `teeType` cache field, extracts and stores TEE type
+7. `templates/validator/validator.html` - Displays TEE type row
 
 ## Next Steps
 

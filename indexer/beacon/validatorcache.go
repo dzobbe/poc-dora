@@ -210,14 +210,9 @@ func (cache *validatorCache) updateValidatorSet(slot phase0.Slot, dependentRoot 
 			cachedValidator.finalValidator = validators[i]
 			cachedValidator.finalChecksum = checksum
 			cachedValidator.statusFlags = GetValidatorStatusFlags(validators[i])
-			// Extract TEE type: In extended blockchain, Slashed field contains TEE type
-			// Since phase0.Validator.Slashed is bool, we can only get 0 or 1 here
-			// For full support of value 2 (CCA), custom SSZ decoding is needed
-			if validators[i].Slashed {
-				cachedValidator.teeType = 1
-			} else {
-				cachedValidator.teeType = 0
-			}
+			// Extract TEE type: In extended blockchain, Slashed field contains TEE type (0=SEV, 1=TDX, 2=CCA)
+			// With forked go-eth2-client, Slashed is now uint8, so we can use it directly
+			cachedValidator.teeType = validators[i].Slashed
 			updatedCount++
 
 			activeData := &ValidatorData{
@@ -321,7 +316,8 @@ func GetValidatorStatusFlags(validator *phase0.Validator) uint16 {
 	if validator.ExitEpoch != FarFutureEpoch {
 		flags |= ValidatorStatusExited
 	}
-	if validator.Slashed {
+	// In extended blockchain, Slashed contains TEE type (uint8), treat >0 as slashed/TEE
+	if validator.Slashed > 0 {
 		flags |= ValidatorStatusSlashed
 	}
 	if validator.WithdrawalCredentials[0] == 0x01 || validator.WithdrawalCredentials[0] == 0x02 {
@@ -568,13 +564,12 @@ func (cache *validatorCache) getValidatorStatusMap(epoch phase0.Epoch, blockRoot
 // UnwrapDbValidator unwraps a dbtypes.Validator to a phase0.Validator
 func UnwrapDbValidator(dbValidator *dbtypes.Validator) *phase0.Validator {
 	// Note: In extended blockchain, dbValidator.Slashed contains TEE type (0=SEV, 1=TDX, 2=CCA)
-	// but phase0.Validator.Slashed is bool. We convert: 0->false, >0->true
-	// The actual TEE type value should be read from the database when needed.
+	// With the forked go-eth2-client, phase0.Validator.Slashed is now uint8, so we can use it directly
 	validator := &phase0.Validator{
 		PublicKey:                  phase0.BLSPubKey(dbValidator.Pubkey),
 		WithdrawalCredentials:      dbValidator.WithdrawalCredentials,
 		EffectiveBalance:           phase0.Gwei(dbValidator.EffectiveBalance),
-		Slashed:                    dbValidator.Slashed > 0, // Convert uint8 TEE type to bool
+		Slashed:                    dbValidator.Slashed, // Now uint8 in forked library, can use directly
 		ActivationEligibilityEpoch: phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ActivationEligibilityEpoch)),
 		ActivationEpoch:            phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ActivationEpoch)),
 		ExitEpoch:                  phase0.Epoch(db.ConvertInt64ToUint64(dbValidator.ExitEpoch)),
@@ -663,11 +658,8 @@ func calculateValidatorChecksum(v *phase0.Validator) uint64 {
 	data = append(data, v.PublicKey[:]...)
 	data = append(data, v.WithdrawalCredentials[:]...)
 	data = append(data, uint64ToBytes(uint64(v.EffectiveBalance))...)
-	if v.Slashed {
-		data = append(data, 1)
-	} else {
-		data = append(data, 0)
-	}
+	// Slashed is now uint8 in forked library, append directly
+	data = append(data, v.Slashed)
 	data = append(data, uint64ToBytes(uint64(v.ActivationEligibilityEpoch))...)
 	data = append(data, uint64ToBytes(uint64(v.ActivationEpoch))...)
 	data = append(data, uint64ToBytes(uint64(v.ExitEpoch))...)
@@ -801,14 +793,13 @@ func (cache *validatorCache) persistValidators(tx *sqlx.Tx) (bool, error) {
 		lastIndex = uint64(index)
 
 		// Convert to db type
-		// Use cached TEE type value which was extracted during validator set update
-		// This preserves the original TEE type value (0=SEV, 1=TDX, 2=CCA if custom decoding is used)
+		// With forked go-eth2-client, Slashed is now uint8 and contains TEE type directly
 		dbVal := &dbtypes.Validator{
 			ValidatorIndex:             uint64(index),
 			Pubkey:                     entry.finalValidator.PublicKey[:],
 			WithdrawalCredentials:      entry.finalValidator.WithdrawalCredentials[:],
 			EffectiveBalance:           uint64(entry.finalValidator.EffectiveBalance),
-			Slashed:                    entry.teeType, // Use cached TEE type value
+			Slashed:                    entry.finalValidator.Slashed, // Now uint8, use directly
 			ActivationEligibilityEpoch: db.ConvertUint64ToInt64(uint64(entry.finalValidator.ActivationEligibilityEpoch)),
 			ActivationEpoch:            db.ConvertUint64ToInt64(uint64(entry.finalValidator.ActivationEpoch)),
 			ExitEpoch:                  db.ConvertUint64ToInt64(uint64(entry.finalValidator.ExitEpoch)),
